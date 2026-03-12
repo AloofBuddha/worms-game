@@ -1,0 +1,9 @@
+{
+  "name": "@worms/server",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "echo 'skipped - no source yet'"
+  }
+}

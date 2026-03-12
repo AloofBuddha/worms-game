@@ -1,0 +1,7 @@
+node_modules
+dist
+.parcel-cache
+.turbo
+*.tsbuildinfo
+.env
+.env.local
