@@ -4,17 +4,23 @@ import { generateTerrainBitmap } from './TerrainGenerator.js';
 
 /**
  * Manages the terrain as a bitmap texture in Phaser.
- * Supports carving (destruction) via canvas composite operations.
+ * Maintains a cached alpha buffer for fast solid/air lookups.
  */
 export class TerrainBitmap {
   private canvas: OffscreenCanvas;
   private ctx: OffscreenCanvasRenderingContext2D;
   private texture: Phaser.Textures.CanvasTexture;
   private image: Phaser.GameObjects.Image;
+  private alphaBuffer: Uint8Array;
 
   constructor(private scene: Phaser.Scene, seed: number) {
-    // Generate terrain data
     const imageData = generateTerrainBitmap(seed);
+
+    // Cache alpha channel for fast lookups
+    this.alphaBuffer = new Uint8Array(GAME_WIDTH * GAME_HEIGHT);
+    for (let i = 0; i < this.alphaBuffer.length; i++) {
+      this.alphaBuffer[i] = imageData.data[i * 4 + 3];
+    }
 
     // Create offscreen canvas and paint terrain
     this.canvas = new OffscreenCanvas(GAME_WIDTH, GAME_HEIGHT);
@@ -44,6 +50,24 @@ export class TerrainBitmap {
     this.ctx.fill();
     this.ctx.globalCompositeOperation = 'source-over';
 
+    // Update alpha buffer in the affected region
+    const r = Math.ceil(radius);
+    const minX = Math.max(0, Math.floor(x) - r);
+    const maxX = Math.min(GAME_WIDTH - 1, Math.floor(x) + r);
+    const minY = Math.max(0, Math.floor(y) - r);
+    const maxY = Math.min(GAME_HEIGHT - 1, Math.floor(y) + r);
+    const r2 = radius * radius;
+
+    for (let py = minY; py <= maxY; py++) {
+      for (let px = minX; px <= maxX; px++) {
+        const dx = px - x;
+        const dy = py - y;
+        if (dx * dx + dy * dy <= r2) {
+          this.alphaBuffer[py * GAME_WIDTH + px] = 0;
+        }
+      }
+    }
+
     // Sync to Phaser texture
     const texCtx = this.texture.getContext();
     texCtx.clearRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
@@ -52,15 +76,12 @@ export class TerrainBitmap {
   }
 
   /**
-   * Check if a pixel is solid terrain.
+   * Check if a pixel is solid terrain. O(1) via alpha buffer.
    */
   isSolid(x: number, y: number): boolean {
-    if (x < 0 || x >= GAME_WIDTH || y < 0 || y >= GAME_HEIGHT) return false;
-    const pixel = this.ctx.getImageData(Math.floor(x), Math.floor(y), 1, 1).data;
-    return pixel[3] > 0;
-  }
-
-  getCanvas(): OffscreenCanvas {
-    return this.canvas;
+    const ix = Math.floor(x);
+    const iy = Math.floor(y);
+    if (ix < 0 || ix >= GAME_WIDTH || iy < 0 || iy >= GAME_HEIGHT) return false;
+    return this.alphaBuffer[iy * GAME_WIDTH + ix] > 0;
   }
 }

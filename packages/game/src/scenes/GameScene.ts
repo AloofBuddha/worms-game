@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { GAME_WIDTH, GAME_HEIGHT, WATER_LEVEL, DESTROY_RADIUS } from '@worms/shared';
 import { TerrainBitmap } from '../terrain/TerrainBitmap.js';
+import { TerrainPhysics } from '../terrain/TerrainPhysics.js';
 
 const CAMERA_ZOOM = 2;
 const ZOOM_MAX = 4;
@@ -8,6 +9,7 @@ const ZOOM_STEP = 0.1;
 
 export class GameScene extends Phaser.Scene {
   private terrain!: TerrainBitmap;
+  private terrainPhysics!: TerrainPhysics;
   private isDragging = false;
   private dragStartX = 0;
   private dragStartY = 0;
@@ -29,11 +31,20 @@ export class GameScene extends Phaser.Scene {
     const seed = Date.now();
     this.terrain = new TerrainBitmap(this, seed);
 
+    // Build physics bodies from terrain bitmap
+    this.terrainPhysics = new TerrainPhysics(this, this.terrain);
+
     // Water
     const water = this.add.graphics();
     water.fillStyle(0x1E90FF, 0.7);
     water.fillRect(0, WATER_LEVEL, GAME_WIDTH, GAME_HEIGHT - WATER_LEVEL);
     water.setDepth(2);
+
+    // Test ball — drops onto terrain to verify physics
+    this.matter.add.circle(GAME_WIDTH / 2, 50, 10, {
+      restitution: 0.3,
+      friction: 0.5,
+    });
 
     // Camera: zoom in and center on terrain
     const cam = this.cameras.main;
@@ -50,8 +61,9 @@ export class GameScene extends Phaser.Scene {
         this.camStartX = cam.scrollX;
         this.camStartY = cam.scrollY;
       } else if (pointer.leftButtonDown()) {
-        // Left-click to destroy terrain (sandbox mode)
+        // Left-click to destroy terrain + rebuild physics
         this.terrain.destroy(pointer.worldX, pointer.worldY, DESTROY_RADIUS);
+        this.terrainPhysics.rebuildAround(pointer.worldX, pointer.worldY, DESTROY_RADIUS);
       }
     });
 
@@ -76,14 +88,21 @@ export class GameScene extends Phaser.Scene {
       const newZoom = Phaser.Math.Clamp(oldZoom - dy * ZOOM_STEP * 0.01, zoomMin, ZOOM_MAX);
       if (newZoom === oldZoom) return;
 
-      // Screen-space mouse position relative to camera viewport
-      const px = pointer.x;
-      const py = pointer.y;
+      // Offset from viewport center — zoom scales around center in Phaser
+      const dx = pointer.x - cam.width * 0.5;
+      const dy2 = pointer.y - cam.height * 0.5;
 
-      // Adjust scroll so the world point under the mouse stays fixed
-      cam.scrollX += px * (1 / oldZoom - 1 / newZoom);
-      cam.scrollY += py * (1 / oldZoom - 1 / newZoom);
+      cam.scrollX += dx * (1 / oldZoom - 1 / newZoom);
+      cam.scrollY += dy2 * (1 / oldZoom - 1 / newZoom);
       cam.setZoom(newZoom);
+    });
+
+    // L key toggles physics debug wireframes
+    this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.L).on('down', () => {
+      this.matter.world.drawDebug = !this.matter.world.drawDebug;
+      if (!this.matter.world.drawDebug) {
+        this.matter.world.debugGraphic.clear();
+      }
     });
 
     // Disable right-click context menu on the canvas
