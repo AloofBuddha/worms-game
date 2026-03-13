@@ -12,12 +12,30 @@ function seededRandom(seed: number): () => number {
   };
 }
 
+// Noise sampled at absolute pixel scale so terrain features are consistent
+const SCALE = 0.005;
+const EDGE_DEPTH = 6;
+// Terrain lives in the bottom portion of the map
+const SKY_CUTOFF = 0.3;
+
+function sampleNoise(noise2D: (x: number, y: number) => number, x: number, y: number): number {
+  return (
+    0.5  * noise2D(x * SCALE, y * SCALE) +
+    0.25 * noise2D(x * SCALE * 2, y * SCALE * 2) +
+    0.125 * noise2D(x * SCALE * 4, y * SCALE * 4)
+  );
+}
+
+function isSolidAt(noise2D: (x: number, y: number) => number, x: number, y: number): boolean {
+  const depthFactor = y / GAME_HEIGHT;
+  const threshold = -0.2 + depthFactor * 1.0;
+  return sampleNoise(noise2D, x, y) < threshold && y > GAME_HEIGHT * SKY_CUTOFF && y < WATER_LEVEL;
+}
+
 export function generateTerrainBitmap(seed: number): ImageData {
   const width = GAME_WIDTH;
   const height = GAME_HEIGHT;
-
   const noise2D = createNoise2D(seededRandom(seed));
-
   const imageData = new ImageData(width, height);
   const data = imageData.data;
 
@@ -25,67 +43,27 @@ export function generateTerrainBitmap(seed: number): ImageData {
     for (let y = 0; y < height; y++) {
       const idx = (y * width + x) * 4;
 
-      // Vertical gradient: more likely solid at bottom
-      const depthFactor = y / height;
+      if (!isSolidAt(noise2D, x, y)) continue; // transparent by default (ImageData is zeroed)
 
-      // Multi-octave noise
-      const nx = x / width;
-      const ny = y / height;
-      let noiseVal =
-        0.5 * noise2D(nx * 4, ny * 4) +
-        0.25 * noise2D(nx * 8, ny * 8) +
-        0.125 * noise2D(nx * 16, ny * 16);
-
-      // Combine: below a threshold = solid terrain
-      const threshold = -0.3 + depthFactor * 1.2;
-      const isSolid = noiseVal < threshold && y > height * 0.15 && y < WATER_LEVEL;
-
-      if (isSolid) {
-        // Check if this pixel is near the terrain surface (edge detection)
-        const edgeDepth = 8;
-        let isEdge = false;
-
-        // Simple edge detection: check if there's air above within edgeDepth pixels
-        for (let dy = 1; dy <= edgeDepth; dy++) {
-          const checkY = y - dy;
-          if (checkY < 0) {
-            isEdge = true;
-            break;
-          }
-          const checkNx = x / width;
-          const checkNy = checkY / height;
-          const checkDepthFactor = checkY / height;
-          const checkNoise =
-            0.5 * noise2D(checkNx * 4, checkNy * 4) +
-            0.25 * noise2D(checkNx * 8, checkNy * 8) +
-            0.125 * noise2D(checkNx * 16, checkNy * 16);
-          const checkThreshold = -0.3 + checkDepthFactor * 1.2;
-          const checkSolid = checkNoise < checkThreshold && checkY > height * 0.15 && checkY < WATER_LEVEL;
-          if (!checkSolid) {
-            isEdge = true;
-            break;
-          }
+      // Edge detection: check if air is above within EDGE_DEPTH pixels
+      let isEdge = false;
+      for (let dy = 1; dy <= EDGE_DEPTH; dy++) {
+        if (!isSolidAt(noise2D, x, y - dy)) {
+          isEdge = true;
+          break;
         }
-
-        if (isEdge) {
-          // Green grass edge
-          data[idx] = 34;     // R
-          data[idx + 1] = 139; // G
-          data[idx + 2] = 34;  // B
-        } else {
-          // Brown dirt interior
-          data[idx] = 139;    // R
-          data[idx + 1] = 69;  // G
-          data[idx + 2] = 19;  // B
-        }
-        data[idx + 3] = 255; // A (opaque = solid)
-      } else {
-        // Transparent = air
-        data[idx] = 0;
-        data[idx + 1] = 0;
-        data[idx + 2] = 0;
-        data[idx + 3] = 0;
       }
+
+      if (isEdge) {
+        data[idx] = 34;      // green grass
+        data[idx + 1] = 139;
+        data[idx + 2] = 34;
+      } else {
+        data[idx] = 139;     // brown dirt
+        data[idx + 1] = 69;
+        data[idx + 2] = 19;
+      }
+      data[idx + 3] = 255;
     }
   }
 
